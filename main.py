@@ -26,16 +26,22 @@ yellow = (255, 255, 0)
 creature_size = 50
 
 class AnimatedCreature(pygame.sprite.Sprite):
-    def __init__(self, color, pos, images):
+    def __init__(self, color, pos, idle_images, attack_images, take_hit_images):
         super().__init__()
         self.color = color
         self.pos = pos
-        self.images = images
+        self.idle_images = idle_images
+        self.attack_images = attack_images
+        self.take_hit_images = take_hit_images
         self.current_image = 0
+        self.images = self.idle_images
         self.image = self.images[self.current_image]
         self.rect = self.image.get_rect(center=self.pos)
         self.animation_speed = 0.1  # Animation speed
         self.animation_counter = 0
+        self.is_attacking = False
+        self.is_taking_hit = False
+        self.animation_callback = None
 
     def update(self):
         self.animation_counter += self.animation_speed
@@ -44,17 +50,51 @@ class AnimatedCreature(pygame.sprite.Sprite):
             self.current_image = (self.current_image + 1) % len(self.images)
             self.image = self.images[self.current_image]
             self.rect = self.image.get_rect(center=self.pos)
+        if self.is_attacking and self.current_image == len(self.images) - 1:
+            self.is_attacking = False
+            self.images = self.idle_images
+            self.current_image = 0
+            if self.animation_callback:
+                callback = self.animation_callback
+                self.animation_callback = None
+                callback()
+        if self.is_taking_hit and self.current_image == len(self.images) - 1:
+            self.is_taking_hit = False
+            self.images = self.idle_images
+            self.current_image = 0
+            if self.animation_callback:
+                callback = self.animation_callback
+                self.animation_callback = None
+                callback()
+
+    def attack(self, callback=None):
+        self.is_attacking = True
+        self.images = self.attack_images
+        self.current_image = 0
+        self.animation_callback = callback
+
+    def take_hit(self, callback=None):
+        self.is_taking_hit = True
+        self.images = self.take_hit_images
+        self.current_image = 0
+        self.animation_callback = callback
 
 # Load animation frames
-red_creature_images = [pygame.image.load(f"demon_cleave_{i}.png") for i in range(1, 15)]
-blue_creature_images = [pygame.image.load(f"demon_cleave_{i}.png") for i in range(1, 15)]
+red_creature_idle = [pygame.image.load(f"boss_demon_slime_FREE_v1.0/individual_sprites/01_demon_idle/demon_idle_{i}.png") for i in range(1, 6)]
+blue_creature_idle =  [pygame.image.load(f"Elementals_fire_knight_FREE_v1.1/png/fire_knight/01_idle/idle_{i}.png") for i in range(1, 8)]
+
+red_creature_attack = [pygame.image.load(f"boss_demon_slime_FREE_v1.0/individual_sprites/03_demon_cleave/demon_cleave_{i}.png") for i in range(1, 15)]
+blue_creature_attack =  [pygame.image.load(f"Elementals_fire_knight_FREE_v1.1/png/fire_knight/05_1_atk/1_atk_{i}.png") for i in range(1, 11)]
+
+red_creature_take_hit = [pygame.image.load(f"boss_demon_slime_FREE_v1.0/individual_sprites/04_demon_take_hit/demon_take_hit_{i}.png") for i in range(1, 5)]
+blue_creature_take_hit =  [pygame.image.load(f"Elementals_fire_knight_FREE_v1.1/png/fire_knight/10_take_hit/take_hit_{i}.png") for i in range(1, 6)]
 
 # Player and enemy creatures
 player_creature = None
-player_creature_pos = [width // 4, height // 2]
+player_creature_pos = [width // 4, height // 1.5]
 player_creature_health = 100
 
-enemy_creature_pos = [3 * width // 4, height // 2]
+enemy_creature_pos = [3 * width // 4, height // 3]
 enemy_creature_health = 100
 
 # Create sprite groups
@@ -72,6 +112,11 @@ font = pygame.font.Font(None, 36)
 # Game state
 choosing_creature = True
 turn = "player"
+
+# Define next_turn function
+def next_turn(new_turn):
+    global turn
+    turn = new_turn
 
 # Main game loop
 running = True
@@ -94,15 +139,15 @@ while running:
         # Check for creature selection
         if event.type == pygame.MOUSEBUTTONDOWN:
             if red_creature_rect.collidepoint(event.pos):
-                player_creature = AnimatedCreature(red, player_creature_pos, red_creature_images)
-                enemy_creature = AnimatedCreature(blue, enemy_creature_pos, blue_creature_images)
+                player_creature = AnimatedCreature(red, player_creature_pos, red_creature_idle, red_creature_attack, red_creature_take_hit)
+                enemy_creature = AnimatedCreature(blue, enemy_creature_pos, blue_creature_idle, blue_creature_attack, blue_creature_take_hit)
                 player_group.add(player_creature)
                 enemy_group.add(enemy_creature)
                 all_sprites.add(player_creature, enemy_creature)
                 choosing_creature = False
             elif blue_creature_rect.collidepoint(event.pos):
-                player_creature = AnimatedCreature(blue, player_creature_pos, blue_creature_images)
-                enemy_creature = AnimatedCreature(red, enemy_creature_pos, red_creature_images)
+                player_creature = AnimatedCreature(blue, player_creature_pos, blue_creature_idle, blue_creature_attack, blue_creature_take_hit)
+                enemy_creature = AnimatedCreature(red, enemy_creature_pos, red_creature_idle, red_creature_attack, red_creature_take_hit)
                 player_group.add(player_creature)
                 enemy_group.add(enemy_creature)
                 all_sprites.add(player_creature, enemy_creature)
@@ -121,14 +166,18 @@ while running:
 
         if turn == "player":
             text = font.render("Your turn! Click on the enemy to attack.", True, white)
-            win.blit(text, (width // 2 - text.get_width() // 2, height // 4))
+            win.blit(text, (width // 2 - text.get_width() // 2, height // 6))
 
             if event.type == pygame.MOUSEBUTTONDOWN and enemy_creature.rect.collidepoint(event.pos):
                 damage = random.randint(5, 20)
                 enemy_creature_health -= damage
-                turn = "enemy"
 
-        else:
+                def enemy_take_hit():
+                    enemy_creature.take_hit(lambda: next_turn("enemy"))
+
+                player_creature.attack(enemy_take_hit)
+
+        elif turn == "enemy":
             text = font.render("Enemy's turn!", True, white)
             win.blit(text, (width // 2 - text.get_width() // 2, height // 4))
 
@@ -137,7 +186,11 @@ while running:
 
             damage = random.randint(5, 20)
             player_creature_health -= damage
-            turn = "player"
+
+            def player_take_hit():
+                player_creature.take_hit(lambda: next_turn("player"))
+
+            enemy_creature.attack(player_take_hit)
 
         if player_creature_health <= 0 or enemy_creature_health <= 0:
             if player_creature_health <= 0:
@@ -154,4 +207,3 @@ while running:
     clock.tick(fps)
 
 pygame.quit()
-sys.exit()
